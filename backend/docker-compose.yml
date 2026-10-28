@@ -1,0 +1,20 @@
+services:
+  diagnostics-backend:
+    build: .
+    container_name: network-diagnostics-backend
+    restart: unless-stopped
+    ports:
+      - "3002:3002"       # REST API & Outbox Sync
+      - "1161:1161/udp"   # SNMP Mock Agent (UDP)
+      - "2222:2222"       # SSH Diagnostic Daemon
+    environment:
+      - NODE_ENV=production
+      - PORT=3002
+      - SNMP_PORT=1161
+      - SSH_PORT=2222
+    volumes:
+      - reports_data:/app/uploads/reports
+
+volumes:
+  reports_data:
+

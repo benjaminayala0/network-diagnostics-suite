@@ -1,0 +1,61 @@
+
+# Dependencies
+node_modules/
+.pnp/
+.pnp.js
+
+# Build & Distribution Artifacts
+dist/
+build/
+out/
+.next/
+*.tsbuildinfo
+
+# Environment & Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+*.keystore
+*.jks
+
+# Logs & Diagnostic Outputs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Mobile & Expo Artifacts
+.expo/
+.expo-shared/
+web-build/
+
+# Local Databases & Storage
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# File Uploads (ignore uploaded PDFs, keep directory structure)
+uploads/reports/*.pdf
+!uploads/reports/.gitkeep
+backend/uploads/reports/*.pdf
+!backend/uploads/reports/.gitkeep
+
+# Operating System & Editor Files
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
