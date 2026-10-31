@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Network Diagnostics Suite",
+    "slug": "network-diagnostics-suite",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "scheme": "networkdiag",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "backgroundColor": "#0A0F1D"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.telecom.networkdiagnostics",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Network Diagnostics Suite requires camera access to scan equipment QR/barcodes and attach installation evidence photos.",
+        "NSLocationWhenInUseUsageDescription": "Network Diagnostics Suite requires GPS access to georeference technical diagnostic reports.",
+        "NSLocalNetworkUsageDescription": "Network Diagnostics Suite scans and diagnoses equipment on your local telecommunications subnet."
+      }
+    },
+    "android": {
+      "package": "com.telecom.networkdiagnostics",
+      "permissions": [
+        "CAMERA",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_NETWORK_STATE",
+        "ACCESS_WIFI_STATE",
+        "INTERNET"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow Network Diagnostics Suite to scan equipment barcodes and document installations."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Network Diagnostics Suite to tag installation reports with site coordinates."
+        }
+      ]
+    ]
+  }
+}
+
