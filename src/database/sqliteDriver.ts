@@ -9,55 +9,91 @@ export interface DatabaseAdapter {
 }
 
 let dbInstance: DatabaseAdapter | null = null;
+let dbPromise: Promise<DatabaseAdapter> | null = null;
 
 export function setDatabaseAdapter(adapter: DatabaseAdapter): void {
   dbInstance = adapter;
+  dbPromise = Promise.resolve(adapter);
 }
 
 export async function getDatabase(): Promise<DatabaseAdapter> {
   if (dbInstance) {
     return dbInstance;
   }
-
-  try {
-    const SQLite = await import('expo-sqlite');
-    const nativeDb = SQLite.openDatabaseSync('network_diagnostics.db');
-
-    try {
-      nativeDb.execSync('PRAGMA journal_mode = WAL;');
-      nativeDb.execSync('PRAGMA synchronous = NORMAL;');
-    } catch {
-      // PRAGMA may not be supported in all environments
-    }
-
-    const adapter: DatabaseAdapter = {
-      async execAsync(sql: string) {
-        nativeDb.execSync(sql);
-      },
-      async runAsync(sql: string, params: any[] = []) {
-        const result = nativeDb.runSync(sql, params);
-        return {
-          lastInsertRowId: result.lastInsertRowId,
-          changes: result.changes
-        };
-      },
-      async getAllAsync<T = any>(sql: string, params: any[] = []) {
-        return nativeDb.getAllSync<T>(sql, params);
-      },
-      async getFirstAsync<T = any>(sql: string, params: any[] = []) {
-        return nativeDb.getFirstSync<T>(sql, params);
-      }
-    };
-
-    dbInstance = adapter;
-    await initializeSchema(dbInstance);
-    return dbInstance;
-  } catch (error) {
-    console.warn('[Database] Native expo-sqlite not available, using in-memory mock fallback', error);
-    dbInstance = createInMemoryDatabaseAdapter();
-    await initializeSchema(dbInstance);
-    return dbInstance;
+  if (dbPromise) {
+    return dbPromise;
   }
+
+  dbPromise = (async () => {
+    try {
+      const SQLite = await import('expo-sqlite');
+      
+      // Prefer async database opening to prevent JNI NullPointerException on Android
+      const nativeDb = typeof SQLite.openDatabaseAsync === 'function'
+        ? await SQLite.openDatabaseAsync('network_diagnostics.db')
+        : SQLite.openDatabaseSync('network_diagnostics.db');
+
+      try {
+        if (typeof nativeDb.execAsync === 'function') {
+          await nativeDb.execAsync('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+        } else if (typeof nativeDb.execSync === 'function') {
+          nativeDb.execSync('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+        }
+      } catch {
+        // PRAGMA may not be supported in all environments
+      }
+
+      const adapter: DatabaseAdapter = {
+        async execAsync(sql: string) {
+          if (typeof nativeDb.execAsync === 'function') {
+            await nativeDb.execAsync(sql);
+          } else {
+            nativeDb.execSync(sql);
+          }
+        },
+        async runAsync(sql: string, params: any[] = []) {
+          if (typeof nativeDb.runAsync === 'function') {
+            const result = await nativeDb.runAsync(sql, params);
+            return {
+              lastInsertRowId: result.lastInsertRowId,
+              changes: result.changes
+            };
+          }
+          const result = nativeDb.runSync(sql, params);
+          return {
+            lastInsertRowId: result.lastInsertRowId,
+            changes: result.changes
+          };
+        },
+        async getAllAsync<T = any>(sql: string, params: any[] = []) {
+          if (typeof nativeDb.getAllAsync === 'function') {
+            return await nativeDb.getAllAsync<T>(sql, params);
+          }
+          return nativeDb.getAllSync<T>(sql, params);
+        },
+        async getFirstAsync<T = any>(sql: string, params: any[] = []) {
+          if (typeof nativeDb.getFirstAsync === 'function') {
+            return await nativeDb.getFirstAsync<T>(sql, params);
+          }
+          return nativeDb.getFirstSync<T>(sql, params);
+        }
+      };
+
+      await initializeSchema(adapter);
+      dbInstance = adapter;
+      return adapter;
+    } catch (error) {
+      console.warn('[Database] Native expo-sqlite not available or rejected, using in-memory fallback', error);
+      const fallback = createInMemoryDatabaseAdapter();
+      await initializeSchema(fallback);
+      dbInstance = fallback;
+      return fallback;
+    } finally {
+      dbPromise = null;
+    }
+  })();
+
+  return dbPromise;
 }
 
 export async function initializeSchema(db: DatabaseAdapter): Promise<void> {
