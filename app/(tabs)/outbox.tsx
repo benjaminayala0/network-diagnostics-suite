@@ -106,9 +106,9 @@ export default function OutboxScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Outbox Queue Manager</Text>
-          <Text style={styles.headerSubtitle}>Offline-First Deferred Synchronization</Text>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.headerTitle} numberOfLines={1}>Outbox Queue Manager</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>Offline-First Synchronization</Text>
         </View>
         <TouchableOpacity
           style={[styles.networkToggle, { backgroundColor: isOnline ? colors.badgeOnline : colors.badgeOffline }]}
@@ -253,6 +253,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border
   },
+  headerTextContainer: {
+    flex: 1,
+    marginRight: 10
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -268,7 +272,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
     paddingVertical: 6,
-    borderRadius: 16
+    borderRadius: 16,
+    flexShrink: 0
   },
   networkToggleText: {
     fontSize: 11,

@@ -109,9 +109,9 @@ export default function DiscoveryScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Network Discovery</Text>
-          <Text style={styles.headerSubtitle}>Subnet ARP & Host Discovery</Text>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.headerTitle} numberOfLines={1}>Network Discovery</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>Subnet ARP & Host Discovery</Text>
         </View>
         <TouchableOpacity
           style={styles.refreshButton}
@@ -228,6 +228,10 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border
+  },
+  headerTextContainer: {
+    flex: 1,
+    marginRight: 10
   },
   headerTitle: {
     fontSize: 18,

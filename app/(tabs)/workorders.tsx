@@ -393,9 +393,9 @@ export default function WorkOrdersScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Field Work Orders</Text>
-          <Text style={styles.headerSubtitle}>Commissioning & Georeferenced PDF Reports</Text>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.headerTitle} numberOfLines={1}>Field Work Orders</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>Commissioning & PDF Reports</Text>
         </View>
         <TouchableOpacity
           style={styles.addButton}
@@ -404,7 +404,7 @@ export default function WorkOrdersScreen() {
             setModalVisible(true);
           }}
         >
-          <Ionicons name="add" size={20} color="#000000" />
+          <Ionicons name="add" size={18} color="#000000" />
           <Text style={styles.addButtonText}>New Order</Text>
         </TouchableOpacity>
       </View>
@@ -751,6 +751,10 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border
   },
+  headerTextContainer: {
+    flex: 1,
+    marginRight: 12
+  },
   headerTitle: {
     fontSize: 18,
     fontWeight: 'bold',
@@ -766,8 +770,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: colors.primary,
     paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6
+    paddingVertical: 7,
+    borderRadius: 6,
+    flexShrink: 0
   },
   addButtonText: {
     color: '#000000',

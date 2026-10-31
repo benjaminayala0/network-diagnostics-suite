@@ -216,9 +216,9 @@ export default function DiagnosticsScreen() {
     <SafeAreaView style={styles.container} edges={['top']}>
       {/* Header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerTitle}>Field Diagnostics Engine</Text>
-          <Text style={styles.headerSubtitle}>SNMP MIB-II & SSH Diagnostic Remote Shell</Text>
+        <View style={styles.headerTextContainer}>
+          <Text style={styles.headerTitle} numberOfLines={1}>Field Diagnostics Engine</Text>
+          <Text style={styles.headerSubtitle} numberOfLines={1}>SNMP MIB-II & SSH Diagnostic Remote Shell</Text>
         </View>
       </View>
 
@@ -565,6 +565,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: colors.border
+  },
+  headerTextContainer: {
+    flex: 1
   },
   headerTitle: {
     fontSize: 18,
