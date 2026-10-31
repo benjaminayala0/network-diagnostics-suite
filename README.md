@@ -14,40 +14,25 @@ A cross-platform mobile and web engineering toolkit designed for telecommunicati
 
 ## Architecture Overview
 
-```text
-+-----------------------------------------------------------------------------------+
-|                        MOBILE CLIENT (React Native / Expo)                         |
-|                                                                                   |
-|  [ Subnet Discovery ]   [ MIB-II Diagnostics ]   [ Work Orders & Barcode / PDF ]   |
-|          |                       |                            |                   |
-|          +-----------------------+----------------------------+                   |
-|                                  |                                                |
-|                      +------------------------+                                   |
-|                      |  SQLite Engine (WAL)   |                                   |
-|                      |  - discovered_devices  |                                   |
-|                      |  - diagnostic_sessions |                                   |
-|                      |  - work_orders         |                                   |
-|                      |  - outbox_events (FIFO)|                                   |
-|                      +------------------------+                                   |
-|                                  |                                                |
-|                      +------------------------+                                   |
-|                      |   Outbox Sync Engine   | (Exponential Backoff: 1s..32s)    |
-|                      +------------------------+                                   |
-+----------------------------------|------------------------------------------------+
-                                   | HTTP / REST (Batch Ingestion API)
-                                   v
-+-----------------------------------------------------------------------------------+
-|                     DIAGNOSTIC BACKEND & AGENT DAEMONS                            |
-|                                                                                   |
-|  [ Express Synchronization API :3002 ]                                            |
-|    - POST /api/sync/batch (Idempotent event processing)                           |
-|    - GET  /api/assets/:serial (Hardware datasheet lookup)                         |
-|    - POST /api/reports/upload (Commissioning PDF archiving)                       |
-|                                                                                   |
-|  [ Diagnostic Mock Network Daemons ]                                              |
-|    - SNMP MIB-II UDP Daemon :1161 (RFC 1157 ASN.1/BER query engine)               |
-|    - SSH Diagnostic Server  :2222 (RouterOS / Cisco IOS command emulation)       |
-+-----------------------------------------------------------------------------------+
+```mermaid
+flowchart TD
+    subgraph MobileClient ["Mobile Client (React Native / Expo)"]
+        UI["Field Modules\n(Discovery · Diagnostics · Work Orders)"]
+        SQLite[("Local SQLite Engine\n(WAL Mode Cache)")]
+        Outbox["Outbox FIFO Engine\n(Exponential Backoff: 1s..32s)"]
+        UI --> SQLite
+        SQLite --> Outbox
+    end
+
+    subgraph BackendServices ["Backend & Agent Daemons"]
+        SyncAPI["Express REST API :3002\n(Batch Ingestion & Asset Catalog)"]
+        SNMP["SNMP MIB-II Mock Agent\n(UDP :1161 RFC 1157)"]
+        SSH["SSH Remote Terminal\n(TCP :2222 RouterOS/Cisco)"]
+    end
+
+    Outbox -->|"HTTP POST /api/sync/batch"| SyncAPI
+    UI -.->|"SNMP Query (UDP)"| SNMP
+    UI -.->|"SSH Remote Shell (TCP)"| SSH
 ```
 
 ---
@@ -55,10 +40,13 @@ A cross-platform mobile and web engineering toolkit designed for telecommunicati
 ## Core Capabilities
 
 ### 1. Offline-First Outbox Synchronization Engine
-- **Transactional Enqueueing**: Every field action (discovered device, diagnostic run, commissioning work order) is immediately recorded in SQLite and queued as an `outbox_events` record within the same local cycle.
+- **Transactional Enqueueing**: Every field action (discovered device, diagnostic run, commissioning work order) is immediately recorded in SQLite and queued as an `outbox_events` record within the same local transaction.
 - **State Machine Transitions**:
-  $$\text{PENDING} \longrightarrow \text{IN_FLIGHT} \longrightarrow \begin{cases} \text{PROCESSED} & \text{(Server Ack 200)} \\ \text{FAILED} / \text{PENDING} & \text{(Exponential Backoff: } 2^{\text{retry}} \times 1000\text{ms)} \end{cases}$$
-- **Zero Data Loss**: Full operational capability in isolated field environments (towers, subterranean vaults, unserviced rural nodes). Automatically drains queue upon network restoration.
+  - `PENDING`: Event recorded locally in SQLite, waiting for network availability or active sync cycle.
+  - `IN_FLIGHT`: Event batch dispatched to `/api/sync/batch` awaiting server acknowledgment.
+  - `PROCESSED`: Server returned HTTP 200 acknowledgment; event safely marked as processed.
+  - `FAILED`: Network timeout or 5xx error; scheduled for retry using exponential backoff ($2^{\text{retry}} \times 1000\text{ ms}$, max 5 retries).
+- **Zero Data Loss**: Full operational capability in isolated field environments (telecom towers, subterranean vaults, unserviced rural nodes). Automatically drains queue upon network restoration.
 - **SQLite WAL Mode**: Configured with `PRAGMA journal_mode = WAL;` and `PRAGMA synchronous = NORMAL;` for high-throughput concurrent writes with async native mutex locking.
 
 ### 2. Network Protocols & Security Architecture
@@ -80,37 +68,37 @@ A cross-platform mobile and web engineering toolkit designed for telecommunicati
 
 ```text
 .
-├── app/                            # Expo Router (Tabs Architecture)
-│   ├── (tabs)/
-│   │   ├── index.tsx               # Subnet Discovery & Host Inventory
-│   │   ├── diagnostics.tsx         # SNMP MIB-II & SSH Interactive Terminal
-│   │   ├── workorders.tsx          # Barcode Commissioning & Certified PDF Reports
-│   │   ├── outbox.tsx              # Outbox Queue Manager & Network Simulator
-│   │   └── _layout.tsx             # Tab Navigation & Layout
-│   └── _layout.tsx                 # Root Application Layout & Store Init
-├── src/
-│   ├── database/                   # SQLite Driver, Schema & Repositories
-│   │   ├── schema.ts               # DDL Schema, Indices & TypeScript Interfaces
-│   │   ├── sqliteDriver.ts         # SQLite WAL Adapter + Test Memory Mock
-│   │   ├── devicesRepository.ts    # Devices Table CRUD
-│   │   ├── diagnosticsRepository.ts# Diagnostic Sessions CRUD
-│   │   ├── workOrdersRepository.ts # Work Orders CRUD
-│   │   ├── outboxRepository.ts     # Outbox FIFO Event Engine
-│   │   └── __tests__/              # Outbox Engine Integration Test Suite
-│   ├── services/
-│   │   ├── outbox/                 # Outbox Background Synchronization Engine
-│   │   ├── protocols/              # ASN.1 / BER SNMP Binary Parser & Tests
-│   │   └── security/               # SecureStore Credential Vault
-│   ├── stores/                     # Zustand State Management
-│   └── theme/                      # Telecom High-Contrast Dark Palette
-└── backend/                        # Synchronization API & Protocol Daemons
-    ├── src/
-    │   ├── server.ts               # Express 4 REST API & Ingestion Endpoint
-    │   ├── snmpAgent.ts            # UDP 1161 RFC 1157 SNMP MIB-II Mock Agent
-    │   ├── sshMockServer.ts        # TCP 2222 SSH Diagnostic Shell Daemon
-    │   └── __tests__/              # Protocol & Daemon Unit Test Suite
-    ├── Dockerfile                  # Containerized Backend Deployment
-    └── docker-compose.yml          # Multi-Protocol Container Stack
+|-- app/                            # Expo Router (Tabs Architecture)
+|   |-- (tabs)/
+|   |   |-- index.tsx               # Subnet Discovery & Host Inventory
+|   |   |-- diagnostics.tsx         # SNMP MIB-II & SSH Interactive Terminal
+|   |   |-- workorders.tsx          # Barcode Commissioning & Certified PDF Reports
+|   |   |-- outbox.tsx              # Outbox Queue Manager & Network Simulator
+|   |   `-- _layout.tsx             # Tab Navigation & Layout
+|   `-- _layout.tsx                 # Root Application Layout & Store Init
+|-- src/
+|   |-- database/                   # SQLite Driver, Schema & Repositories
+|   |   |-- schema.ts               # DDL Schema, Indices & TypeScript Interfaces
+|   |   |-- sqliteDriver.ts         # SQLite WAL Adapter + Test Memory Mock
+|   |   |-- devicesRepository.ts    # Devices Table CRUD
+|   |   |-- diagnosticsRepository.ts# Diagnostic Sessions CRUD
+|   |   |-- workOrdersRepository.ts # Work Orders CRUD
+|   |   |-- outboxRepository.ts     # Outbox FIFO Event Engine
+|   |   `-- __tests__/              # Outbox Engine Integration Test Suite
+|   |-- services/
+|   |   |-- outbox/                 # Outbox Background Synchronization Engine
+|   |   |-- protocols/              # ASN.1 / BER SNMP Binary Parser & Tests
+|   |   `-- security/               # SecureStore Credential Vault
+|   |-- stores/                     # Zustand State Management
+|   `-- theme/                      # Telecom High-Contrast Dark Palette
+`-- backend/                        # Synchronization API & Protocol Daemons
+    |-- src/
+    |   |-- server.ts               # Express 4 REST API & Ingestion Endpoint
+    |   |-- snmpAgent.ts            # UDP 1161 RFC 1157 SNMP MIB-II Mock Agent
+    |   |-- sshMockServer.ts        # TCP 2222 SSH Diagnostic Shell Daemon
+    |   `-- __tests__/              # Protocol & Daemon Unit Test Suite
+    |-- Dockerfile                  # Containerized Backend Deployment
+    `-- docker-compose.yml          # Multi-Protocol Container Stack
 ```
 
 ---
@@ -157,6 +145,7 @@ Available run options:
 ### 3. Run Mobile Test Suites
 
 Verify Outbox and SNMP Protocol parsing independently:
+
 ```bash
 # Verify SQLite Outbox state machine & exponential backoff
 npm run test:outbox
@@ -195,4 +184,3 @@ npm run test:snmp
 - **Local Storage Engine**: SQLite with Write-Ahead Logging (`expo-sqlite`)
 - **Security Standard**: OWASP Mobile Application Security Verification Standard (MASVS v2.0 - Storage Category)
 - **Binary Protocols**: ITU-T X.690 / RFC 1157 (SNMPv1) / RFC 1213 (MIB-II)
-
