@@ -78,7 +78,14 @@ export default function WorkOrdersScreen() {
     setLoading(true);
     try {
       const url = `${backendUrl.replace(/\/$/, '')}/api/assets/${encodeURIComponent(serial)}`;
-      const res = await fetch(url);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
+      let res: Response;
+      try {
+        res = await fetch(url, { signal: controller.signal });
+      } finally {
+        clearTimeout(timeoutId);
+      }
       const json = await res.json();
       if (res.ok && json.asset) {
         setEquipmentModel(`${json.asset.vendor} ${json.asset.model}`);

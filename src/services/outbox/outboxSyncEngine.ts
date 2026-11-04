@@ -8,6 +8,21 @@ export function getDefaultBackendUrl(): string {
     const hostname = window.location.hostname || 'localhost';
     return `http://${hostname}:3002`;
   }
+  
+  // Try to detect Expo host IP (works on physical phone connected via Expo Go / Metro)
+  try {
+    const Constants = require('expo-constants').default;
+    const hostUri = Constants?.expoConfig?.hostUri || Constants?.manifest?.debuggerHost || Constants?.manifest2?.extra?.expoGo?.debuggerHost;
+    if (hostUri) {
+      const host = hostUri.split(':')[0];
+      if (host && host !== 'localhost' && host !== '127.0.0.1') {
+        return `http://${host}:3002`;
+      }
+    }
+  } catch {
+    // Fallback if expo-constants is unavailable
+  }
+
   return 'http://10.0.2.2:3002';
 }
 
@@ -69,11 +84,12 @@ export class OutboxSyncEngine {
 
     this.syncTimer = setInterval(() => {
       if (this.isOnline && !this.isSyncing) {
-        this.triggerFlush();
+        this.triggerFlush().catch(() => {});
       }
     }, intervalMs);
 
-    await this.triggerFlush();
+    // Trigger initial background flush without blocking caller
+    this.triggerFlush().catch(() => {});
   }
 
   public stopAutoSync(): void {
@@ -134,14 +150,22 @@ export class OutboxSyncEngine {
       };
 
       const syncUrl = `${this.backendUrl.replace(/\/$/, '')}/api/sync/outbox`;
-      const response = await fetch(syncUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify(batchPayload)
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      let response: Response;
+      try {
+        response = await fetch(syncUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify(batchPayload),
+          signal: controller.signal
+        });
+      } finally {
+        clearTimeout(timeoutId);
+      }
 
       if (!response.ok) {
         const errorText = await response.text();

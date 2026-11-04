@@ -24,7 +24,7 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
     return dbPromise;
   }
 
-  dbPromise = (async () => {
+  const initPromise = (async () => {
     try {
       const SQLite = await import('expo-sqlite');
       
@@ -34,10 +34,11 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
         : SQLite.openDatabaseSync('network_diagnostics.db');
 
       try {
+        const pragmaCmd = 'PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;';
         if (typeof nativeDb.execAsync === 'function') {
-          await nativeDb.execAsync('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+          await nativeDb.execAsync(pragmaCmd);
         } else if (typeof nativeDb.execSync === 'function') {
-          nativeDb.execSync('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;');
+          nativeDb.execSync(pragmaCmd);
         }
       } catch {
         // PRAGMA may not be supported in all environments
@@ -88,17 +89,39 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
       await initializeSchema(fallback);
       dbInstance = fallback;
       return fallback;
-    } finally {
-      dbPromise = null;
     }
   })();
+
+  const timeoutPromise = new Promise<DatabaseAdapter>((_, reject) =>
+    setTimeout(() => reject(new Error('SQLite initialization timeout')), 5000)
+  );
+
+  dbPromise = Promise.race([initPromise, timeoutPromise])
+    .catch(async (error) => {
+      console.warn('[Database] Native initialization timed out or rejected, falling back to memory adapter:', error);
+      const fallback = createInMemoryDatabaseAdapter();
+      await initializeSchema(fallback);
+      dbInstance = fallback;
+      return fallback;
+    })
+    .finally(() => {
+      dbPromise = null;
+    });
 
   return dbPromise;
 }
 
 export async function initializeSchema(db: DatabaseAdapter): Promise<void> {
-  for (const sql of SCHEMA_SQL) {
-    await db.execAsync(sql);
+  try {
+    await db.execAsync(SCHEMA_SQL.join('\n'));
+  } catch {
+    for (const sql of SCHEMA_SQL) {
+      try {
+        await db.execAsync(sql);
+      } catch {
+        // Continue
+      }
+    }
   }
 }
 
