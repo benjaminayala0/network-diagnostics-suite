@@ -122,6 +122,30 @@ export class OutboxRepository {
     }
   }
 
+  /**
+   * Recovers events stuck in IN_FLIGHT state (e.g. from an interrupted network cycle)
+   * and resets them to PENDING so they can be processed or retried.
+   * If maxAgeMs is 0, all IN_FLIGHT events are reclaimed immediately.
+   */
+  static async reclaimStaleInFlight(maxAgeMs: number = 10000): Promise<number> {
+    const db = await getDatabase();
+    const cutoff = maxAgeMs === 0 ? Date.now() : Date.now() - maxAgeMs;
+    const stale = await db.getAllAsync<{ id: string }>(
+      'SELECT id FROM outbox_events WHERE status = ? AND updated_at <= ?',
+      ['IN_FLIGHT', cutoff]
+    );
+    if (!stale || stale.length === 0) return 0;
+
+    const ids = stale.map(s => s.id);
+    const placeholders = ids.map(() => '?').join(',');
+    const now = Date.now();
+    await db.runAsync(
+      `UPDATE outbox_events SET status = 'PENDING', updated_at = ? WHERE id IN (${placeholders})`,
+      [now, ...ids]
+    );
+    return ids.length;
+  }
+
   static async getQueueMetrics(): Promise<{
     pending: number;
     inFlight: number;

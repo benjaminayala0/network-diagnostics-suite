@@ -30,6 +30,7 @@ export class OutboxSyncEngine {
   private backendUrl: string;
   private isSyncing: boolean = false;
   private isOnline: boolean = true;
+  private isSimulatedOffline: boolean = false;
   private lastSyncTimestamp: number | null = null;
   private lastError: string | null = null;
   private syncTimer: any = null;
@@ -56,20 +57,48 @@ export class OutboxSyncEngine {
     };
   }
 
-  public setOnlineStatus(online: boolean): void {
+  public toggleSimulatedOffline(): boolean {
+    this.isSimulatedOffline = !this.isSimulatedOffline;
+    this.isOnline = !this.isSimulatedOffline;
+    this.emitState();
+    return this.isSimulatedOffline;
+  }
+
+  public isSimulatingOffline(): boolean {
+    return this.isSimulatedOffline;
+  }
+
+  public setOnlineStatus(online: boolean, forceManual: boolean = false): void {
+    if (forceManual) {
+      this.isSimulatedOffline = !online;
+      this.isOnline = online;
+      this.emitState();
+      if (online) {
+        this.triggerFlush().catch(() => {});
+      }
+      return;
+    }
+
+    // When simulated offline is active, OS NetInfo updates should not override user preference
+    if (this.isSimulatedOffline) return;
+
     if (this.isOnline === online) return;
     this.isOnline = online;
     this.emitState();
     if (online) {
-      this.triggerFlush();
+      this.triggerFlush().catch(() => {});
     }
   }
 
   public async startAutoSync(intervalMs: number = 30000): Promise<void> {
+    // Reclaim any orphaned in-flight events from previous sessions on startup
+    await OutboxRepository.reclaimStaleInFlight(0).catch(() => {});
+
     try {
       const NetInfo = await import('@react-native-community/netinfo');
       if (NetInfo && NetInfo.default && typeof NetInfo.default.addEventListener === 'function') {
         this.unsubscribeNetInfo = NetInfo.default.addEventListener((state: any) => {
+          if (this.isSimulatedOffline) return;
           const connected = Boolean(state.isConnected && state.isInternetReachable !== false);
           this.setOnlineStatus(connected);
         });
@@ -119,16 +148,19 @@ export class OutboxSyncEngine {
     this.isSyncing = true;
     this.emitState();
 
+    let inFlightIds: string[] = [];
+
     try {
+      // Automatically reclaim any stale in-flight events before fetching pending queue
+      await OutboxRepository.reclaimStaleInFlight(15000).catch(() => {});
+
       const pendingEvents = await OutboxRepository.getPending(batchSize);
       if (pendingEvents.length === 0) {
-        this.isSyncing = false;
-        this.emitState();
         return { success: true, syncedCount: 0 };
       }
 
-      const ids = pendingEvents.map(e => e.id);
-      await OutboxRepository.markInFlight(ids);
+      inFlightIds = pendingEvents.map(e => e.id);
+      await OutboxRepository.markInFlight(inFlightIds);
       this.emitState();
 
       const batchPayload: OutboxBatchRequest = {
@@ -186,8 +218,6 @@ export class OutboxSyncEngine {
 
       this.lastSyncTimestamp = Date.now();
       this.lastError = null;
-      this.isSyncing = false;
-      this.emitState();
 
       return {
         success: true,
@@ -197,20 +227,21 @@ export class OutboxSyncEngine {
       const errorMsg = err.message || 'Unknown network error during outbox sync';
       this.lastError = errorMsg;
 
-      // Handle failed batch items: re-evaluate pending items that were set to IN_FLIGHT
-      try {
-        const pendingEvents = await OutboxRepository.getPending(batchSize);
-        for (const evt of pendingEvents) {
-          await OutboxRepository.markFailed(evt.id, errorMsg);
+      // Crucial fix: Properly mark the ACTUAL in-flight items as failed with backoff
+      if (inFlightIds.length > 0) {
+        for (const id of inFlightIds) {
+          try {
+            await OutboxRepository.markFailed(id, errorMsg);
+          } catch {
+            // Suppress secondary DB errors
+          }
         }
-      } catch {
-        // Suppress secondary DB errors
       }
 
+      return { success: false, syncedCount: 0, error: errorMsg };
+    } finally {
       this.isSyncing = false;
       this.emitState();
-
-      return { success: false, syncedCount: 0, error: errorMsg };
     }
   }
 

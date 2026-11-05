@@ -201,6 +201,81 @@ async function runTestSuite() {
     process.exit(1);
   }
 
+  // Test 7: Stale In-Flight Event Recovery (reclaimStaleInFlight)
+  try {
+    const orphanEvt = await OutboxRepository.enqueue(
+      'WORK_ORDER_CREATED',
+      'wo_orphan_test',
+      { site: 'Tower Beta' }
+    );
+    await OutboxRepository.markInFlight([orphanEvt.id]);
+
+    let metrics = await OutboxRepository.getQueueMetrics();
+    assert.ok(metrics.inFlight >= 1);
+
+    // Reclaim immediately with maxAgeMs = 0
+    const reclaimed = await OutboxRepository.reclaimStaleInFlight(0);
+    assert.ok(reclaimed >= 1);
+
+    metrics = await OutboxRepository.getQueueMetrics();
+    assert.equal(metrics.inFlight, 0);
+
+    const pending = await OutboxRepository.getPending(10);
+    assert.ok(pending.some(p => p.id === orphanEvt.id));
+
+    console.log('✅ Test 7 Passed: Stale In-Flight Event Auto-Recovery to PENDING');
+    passedTests++;
+  } catch (err: any) {
+    console.error('❌ Test 7 Failed:', err.message);
+    process.exit(1);
+  }
+
+  // Test 8: Failed Flush In-Flight Transition & Simulated Offline Mode
+  try {
+    const syncEngine = new OutboxSyncEngine('http://mock-sync-server:3002');
+    
+    // Toggle simulated offline mode
+    const isSimulated = syncEngine.toggleSimulatedOffline();
+    assert.equal(isSimulated, true);
+    assert.equal(syncEngine.isSimulatingOffline(), true);
+
+    // Verify NetInfo doesn't override while simulated offline
+    syncEngine.setOnlineStatus(true);
+    assert.equal(syncEngine.isSimulatingOffline(), true);
+
+    // Restore online
+    syncEngine.toggleSimulatedOffline();
+    assert.equal(syncEngine.isSimulatingOffline(), false);
+
+    // Mock fetch error to verify in-flight items transition to backoff / failed
+    const failEvt = await OutboxRepository.enqueue(
+      'DIAGNOSTIC_RECORDED',
+      'sess_fail_test',
+      { command: 'ping 8.8.8.8' }
+    );
+
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      throw new Error('Connection refused by mock gateway');
+    };
+
+    const failFlush = await syncEngine.triggerFlush();
+    assert.equal(failFlush.success, false);
+    assert.ok(failFlush.error?.includes('Connection refused'));
+
+    // Events must NOT remain stuck in IN_FLIGHT
+    const metrics = await OutboxRepository.getQueueMetrics();
+    assert.equal(metrics.inFlight, 0);
+
+    globalThis.fetch = originalFetch;
+
+    console.log('✅ Test 8 Passed: Failed Batch Transition with Backoff & Simulated Offline Toggle');
+    passedTests++;
+  } catch (err: any) {
+    console.error('❌ Test 8 Failed:', err.message);
+    process.exit(1);
+  }
+
   console.log(`\n🎉 All ${passedTests} Outbox & SQLite Architecture Tests Passed Successfully!`);
 }
 

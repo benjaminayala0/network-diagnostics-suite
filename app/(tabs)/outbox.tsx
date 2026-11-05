@@ -30,7 +30,8 @@ export default function OutboxScreen() {
     backendUrl,
     setBackendUrl,
     triggerManualSync,
-    setOnlineStatus
+    toggleOfflineMode,
+    reclaimInFlight
   } = useOutboxStore();
 
   const [events, setEvents] = useState<OutboxEvent[]>([]);
@@ -43,6 +44,8 @@ export default function OutboxScreen() {
 
   const loadQueue = useCallback(async () => {
     try {
+      // Reclaim any orphan events stuck in IN_FLIGHT (> 10s)
+      await OutboxRepository.reclaimStaleInFlight(10000).catch(() => {});
       const db = await getDatabase();
       const rows = await db.getAllAsync<OutboxEvent>(
         'SELECT * FROM outbox_events ORDER BY created_at DESC LIMIT 50'
@@ -59,20 +62,15 @@ export default function OutboxScreen() {
 
   const handleManualSync = async () => {
     setRefreshing(true);
+    await OutboxRepository.reclaimStaleInFlight(0).catch(() => {});
     await triggerManualSync();
     await loadQueue();
     setRefreshing(false);
   };
 
   const handleSimulateOfflineToggle = () => {
-    const nextStatus = !isOnline;
-    setOnlineStatus(nextStatus);
-    Alert.alert(
-      nextStatus ? 'Online Mode Restored' : 'Simulated Offline Mode',
-      nextStatus
-        ? 'Connected to network. Outbox will automatically push queued events.'
-        : 'Network disconnected. All reports and diagnostics will be safely queued locally in SQLite.'
-    );
+    toggleOfflineMode();
+    loadQueue();
   };
 
   const renderStatusBadge = (status: OutboxEvent['status']) => {
@@ -193,9 +191,23 @@ export default function OutboxScreen() {
       <View style={styles.listSection}>
         <View style={styles.listHeaderRow}>
           <Text style={styles.listSectionTitle}>Queued Events ({events.length})</Text>
-          <TouchableOpacity onPress={loadQueue}>
-            <Ionicons name="refresh" size={18} color={colors.primary} />
-          </TouchableOpacity>
+          <View style={styles.listHeaderActions}>
+            {inFlightCount > 0 && (
+              <TouchableOpacity
+                style={styles.reclaimButton}
+                onPress={async () => {
+                  await reclaimInFlight();
+                  await loadQueue();
+                }}
+              >
+                <Ionicons name="refresh-circle-outline" size={14} color={colors.info} style={{ marginRight: 4 }} />
+                <Text style={styles.reclaimButtonText}>Reset In-Flight</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity onPress={loadQueue} style={styles.refreshButton}>
+              <Ionicons name="refresh" size={18} color={colors.primary} />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <FlatList
@@ -380,6 +392,29 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8
+  },
+  listHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8
+  },
+  reclaimButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: colors.badgeInFlight,
+    borderWidth: 1,
+    borderColor: colors.info
+  },
+  reclaimButtonText: {
+    color: colors.info,
+    fontSize: 11,
+    fontWeight: '600'
+  },
+  refreshButton: {
+    padding: 2
   },
   listSectionTitle: {
     fontSize: 14,

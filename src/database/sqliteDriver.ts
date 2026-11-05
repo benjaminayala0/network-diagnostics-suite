@@ -222,17 +222,31 @@ export function createInMemoryDatabaseAdapter(): DatabaseAdapter {
         }
 
         if (upper.includes("SET STATUS = 'PENDING'")) {
-          const [retryCount, nextRetryAt, lastError, updatedAt, id] = params;
-          const evt = tables.outbox_events.find(e => e.id === id);
-          if (evt) {
-            evt.status = 'PENDING';
-            evt.retry_count = retryCount;
-            evt.next_retry_at = nextRetryAt;
-            evt.last_error = lastError;
-            evt.updated_at = updatedAt;
-            return { lastInsertRowId: 0, changes: 1 };
+          if (upper.includes('WHERE ID IN')) {
+            const updatedAt = params[0] || Date.now();
+            const ids = params.slice(1);
+            let changes = 0;
+            tables.outbox_events.forEach(evt => {
+              if (ids.includes(evt.id)) {
+                evt.status = 'PENDING';
+                evt.updated_at = updatedAt;
+                changes++;
+              }
+            });
+            return { lastInsertRowId: 0, changes };
+          } else {
+            const [retryCount, nextRetryAt, lastError, updatedAt, id] = params;
+            const evt = tables.outbox_events.find(e => e.id === id);
+            if (evt) {
+              evt.status = 'PENDING';
+              evt.retry_count = retryCount;
+              evt.next_retry_at = nextRetryAt;
+              evt.last_error = lastError;
+              evt.updated_at = updatedAt;
+              return { lastInsertRowId: 0, changes: 1 };
+            }
+            return { lastInsertRowId: 0, changes: 0 };
           }
-          return { lastInsertRowId: 0, changes: 0 };
         }
       }
 
@@ -264,6 +278,11 @@ export function createInMemoryDatabaseAdapter(): DatabaseAdapter {
         if (upper.includes('WHERE ID =')) {
           const targetId = params[0];
           return tables.outbox_events.filter(e => e.id === targetId) as unknown as T[];
+        }
+        if (upper.includes('WHERE STATUS = ?') || upper.includes("STATUS = 'IN_FLIGHT'")) {
+          const targetStatus = params[0];
+          const cutoff = params[1];
+          return tables.outbox_events.filter(e => e.status === targetStatus && (cutoff === undefined || e.updated_at <= cutoff)) as unknown as T[];
         }
         if (upper.includes("STATUS = 'PENDING'")) {
           const now = params[0] || Date.now();
