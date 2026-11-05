@@ -146,6 +146,44 @@ export class OutboxRepository {
     return ids.length;
   }
 
+  /**
+   * Resets all FAILED events back to PENDING with retry_count = 0
+   * so they can be re-attempted when the server is back online.
+   */
+  static async retryAllFailed(): Promise<number> {
+    const db = await getDatabase();
+    const now = Date.now();
+    const failed = await db.getAllAsync<{ id: string }>(
+      'SELECT id FROM outbox_events WHERE status = ?',
+      ['FAILED']
+    );
+    if (!failed || failed.length === 0) return 0;
+
+    const ids = failed.map(f => f.id);
+    const placeholders = ids.map(() => '?').join(',');
+    await db.runAsync(
+      `UPDATE outbox_events 
+       SET status = 'PENDING', retry_count = 0, next_retry_at = ?, last_error = NULL, updated_at = ? 
+       WHERE id IN (${placeholders})`,
+      [now, now, ...ids]
+    );
+    return ids.length;
+  }
+
+  /**
+   * Resets a single event by ID back to PENDING so it can be retried immediately.
+   */
+  static async retryEvent(id: string): Promise<void> {
+    const db = await getDatabase();
+    const now = Date.now();
+    await db.runAsync(
+      `UPDATE outbox_events 
+       SET status = 'PENDING', retry_count = 0, next_retry_at = ?, last_error = NULL, updated_at = ? 
+       WHERE id = ?`,
+      [now, now, id]
+    );
+  }
+
   static async getQueueMetrics(): Promise<{
     pending: number;
     inFlight: number;

@@ -11,6 +11,8 @@ interface OutboxStoreState extends OutboxSyncState {
   setOnlineStatus: (online: boolean) => void;
   toggleOfflineMode: () => boolean;
   reclaimInFlight: () => Promise<number>;
+  retryAllFailed: () => Promise<number>;
+  retryEvent: (id: string) => Promise<void>;
   initSyncEngine: () => () => void;
 }
 
@@ -50,7 +52,7 @@ export const useOutboxStore = create<OutboxStoreState>((set, get) => ({
       isOnline: !isOffline
     });
     if (!isOffline) {
-      defaultOutboxSyncEngine.triggerFlush().catch(() => {});
+      defaultOutboxSyncEngine.triggerFlush().catch(() => { });
     }
     return isOffline;
   },
@@ -65,6 +67,29 @@ export const useOutboxStore = create<OutboxStoreState>((set, get) => ({
       failedCount: metrics.failed
     });
     return reclaimed;
+  },
+
+  retryAllFailed: async () => {
+    const retried = await OutboxRepository.retryAllFailed();
+    const metrics = await OutboxRepository.getQueueMetrics();
+    set({
+      pendingCount: metrics.pending,
+      inFlightCount: metrics.inFlight,
+      processedCount: metrics.processed,
+      failedCount: metrics.failed
+    });
+    return retried;
+  },
+
+  retryEvent: async (id: string) => {
+    await OutboxRepository.retryEvent(id);
+    const metrics = await OutboxRepository.getQueueMetrics();
+    set({
+      pendingCount: metrics.pending,
+      inFlightCount: metrics.inFlight,
+      processedCount: metrics.processed,
+      failedCount: metrics.failed
+    });
   },
 
   initSyncEngine: () => {

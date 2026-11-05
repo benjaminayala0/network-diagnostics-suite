@@ -276,6 +276,40 @@ async function runTestSuite() {
     process.exit(1);
   }
 
+  // Test 9: Dead-letter FAILED Event Recovery & Manual Retry
+  try {
+    const deadEvt = await OutboxRepository.enqueue(
+      'REPORT_UPLOAD',
+      'rep_dead_test',
+      { file: 'antenna_log.pdf' },
+      1
+    );
+
+    // Force to FAILED
+    await OutboxRepository.markFailed(deadEvt.id, 'Gateway 502 Bad Gateway');
+    let metrics = await OutboxRepository.getQueueMetrics();
+    assert.ok(metrics.failed >= 1);
+
+    // Retry all failed events
+    const retriedCount = await OutboxRepository.retryAllFailed();
+    assert.ok(retriedCount >= 1);
+
+    metrics = await OutboxRepository.getQueueMetrics();
+    assert.equal(metrics.failed, 0);
+
+    const pending = await OutboxRepository.getPending(20);
+    const recovered = pending.find(p => p.id === deadEvt.id);
+    assert.ok(recovered);
+    assert.equal(recovered?.status, 'PENDING');
+    assert.equal(recovered?.retry_count, 0);
+
+    console.log('✅ Test 9 Passed: Dead-letter FAILED Event Recovery & Manual Retry');
+    passedTests++;
+  } catch (err: any) {
+    console.error('❌ Test 9 Failed:', err.message);
+    process.exit(1);
+  }
+
   console.log(`\n🎉 All ${passedTests} Outbox & SQLite Architecture Tests Passed Successfully!`);
 }
 

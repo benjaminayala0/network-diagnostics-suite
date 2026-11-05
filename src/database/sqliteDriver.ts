@@ -223,26 +223,39 @@ export function createInMemoryDatabaseAdapter(): DatabaseAdapter {
 
         if (upper.includes("SET STATUS = 'PENDING'")) {
           if (upper.includes('WHERE ID IN')) {
-            const updatedAt = params[0] || Date.now();
-            const ids = params.slice(1);
+            const now = Date.now();
+            const ids = params.filter(p => typeof p === 'string');
             let changes = 0;
             tables.outbox_events.forEach(evt => {
               if (ids.includes(evt.id)) {
                 evt.status = 'PENDING';
-                evt.updated_at = updatedAt;
+                evt.retry_count = 0;
+                evt.next_retry_at = now;
+                evt.last_error = null;
+                evt.updated_at = now;
                 changes++;
               }
             });
             return { lastInsertRowId: 0, changes };
           } else {
-            const [retryCount, nextRetryAt, lastError, updatedAt, id] = params;
-            const evt = tables.outbox_events.find(e => e.id === id);
+            const targetId = params[params.length - 1];
+            const evt = tables.outbox_events.find(e => e.id === targetId);
             if (evt) {
-              evt.status = 'PENDING';
-              evt.retry_count = retryCount;
-              evt.next_retry_at = nextRetryAt;
-              evt.last_error = lastError;
-              evt.updated_at = updatedAt;
+              const now = Date.now();
+              if (upper.includes('RETRY_COUNT = 0')) {
+                evt.status = 'PENDING';
+                evt.retry_count = 0;
+                evt.next_retry_at = now;
+                evt.last_error = null;
+                evt.updated_at = now;
+              } else {
+                const [retryCount, nextRetryAt, lastError, updatedAt] = params;
+                evt.status = 'PENDING';
+                evt.retry_count = retryCount;
+                evt.next_retry_at = nextRetryAt;
+                evt.last_error = lastError;
+                evt.updated_at = updatedAt;
+              }
               return { lastInsertRowId: 0, changes: 1 };
             }
             return { lastInsertRowId: 0, changes: 0 };

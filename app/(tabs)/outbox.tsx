@@ -31,7 +31,9 @@ export default function OutboxScreen() {
     setBackendUrl,
     triggerManualSync,
     toggleOfflineMode,
-    reclaimInFlight
+    reclaimInFlight,
+    retryAllFailed,
+    retryEvent
   } = useOutboxStore();
 
   const [events, setEvents] = useState<OutboxEvent[]>([]);
@@ -61,7 +63,14 @@ export default function OutboxScreen() {
   }, [loadQueue, pendingCount, inFlightCount, processedCount, failedCount]);
 
   const handleManualSync = async () => {
+    if (editingUrl && editingUrl !== backendUrl) {
+      setBackendUrl(editingUrl);
+    }
     setRefreshing(true);
+    // If there are failed events, automatically retry them when user triggers manual sync
+    if (failedCount > 0) {
+      await retryAllFailed();
+    }
     await OutboxRepository.reclaimStaleInFlight(0).catch(() => {});
     await triggerManualSync();
     await loadQueue();
@@ -152,7 +161,7 @@ export default function OutboxScreen() {
             value={editingUrl}
             onChangeText={setEditingUrl}
             onBlur={() => setBackendUrl(editingUrl)}
-            placeholder="http://10.0.2.2:3002"
+            placeholder="http://192.168.1.6:3002"
             placeholderTextColor={colors.textMuted}
             autoCapitalize="none"
           />
@@ -192,6 +201,19 @@ export default function OutboxScreen() {
         <View style={styles.listHeaderRow}>
           <Text style={styles.listSectionTitle}>Queued Events ({events.length})</Text>
           <View style={styles.listHeaderActions}>
+            {failedCount > 0 && (
+              <TouchableOpacity
+                style={styles.retryFailedButton}
+                onPress={async () => {
+                  await retryAllFailed();
+                  await triggerManualSync();
+                  await loadQueue();
+                }}
+              >
+                <Ionicons name="refresh" size={12} color={colors.danger} style={{ marginRight: 3 }} />
+                <Text style={styles.retryFailedButtonText}>Retry Failed ({failedCount})</Text>
+              </TouchableOpacity>
+            )}
             {inFlightCount > 0 && (
               <TouchableOpacity
                 style={styles.reclaimButton}
@@ -228,7 +250,22 @@ export default function OutboxScreen() {
                   <Text style={styles.eventTypeText}>{item.event_type}</Text>
                   <Text style={styles.entityIdText}>ID: {item.entity_id}</Text>
                 </View>
-                {renderStatusBadge(item.status)}
+                <View style={styles.badgeRow}>
+                  {item.status === 'FAILED' && (
+                    <TouchableOpacity
+                      style={styles.cardRetryButton}
+                      onPress={async () => {
+                        await retryEvent(item.id);
+                        await triggerManualSync();
+                        await loadQueue();
+                      }}
+                    >
+                      <Ionicons name="refresh" size={11} color={colors.danger} style={{ marginRight: 2 }} />
+                      <Text style={styles.cardRetryText}>Retry</Text>
+                    </TouchableOpacity>
+                  )}
+                  {renderStatusBadge(item.status)}
+                </View>
               </View>
 
               <View style={styles.eventMetaRow}>
@@ -398,6 +435,21 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8
   },
+  retryFailedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: colors.badgeOffline,
+    borderWidth: 1,
+    borderColor: colors.danger
+  },
+  retryFailedButtonText: {
+    color: colors.danger,
+    fontSize: 11,
+    fontWeight: '600'
+  },
   reclaimButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -415,6 +467,26 @@ const styles = StyleSheet.create({
   },
   refreshButton: {
     padding: 2
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6
+  },
+  cardRetryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 4,
+    backgroundColor: colors.badgeOffline,
+    borderWidth: 1,
+    borderColor: colors.danger
+  },
+  cardRetryText: {
+    color: colors.danger,
+    fontSize: 10,
+    fontWeight: '700'
   },
   listSectionTitle: {
     fontSize: 14,

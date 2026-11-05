@@ -23,7 +23,7 @@ export function getDefaultBackendUrl(): string {
     // Fallback if expo-constants is unavailable
   }
 
-  return 'http://10.0.2.2:3002';
+  return 'http://192.168.1.6:3002';
 }
 
 export class OutboxSyncEngine {
